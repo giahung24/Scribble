@@ -1150,7 +1150,13 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Updater disabled for this fork: the original author's signing key /
+        // release endpoint aren't available here, and the `plugins.updater`
+        // config was removed (see commit e6f6cd2). Registering the plugin
+        // without that config makes `Builder::build()` panic at startup with
+        // PluginInitialization("updater", "... invalid type: null ..."),
+        // which prevented the window from ever appearing. Re-enable by
+        // restoring `plugins.updater` in tauri.conf.json + this line.
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(SidecarState { child: None }))

@@ -93,7 +93,7 @@ export function RecordingBar() {
         translationToggleRef.current = { enabled: translationEnabled, lang: translationLang };
         if (!changed || !recording) return;
 
-        if (sttProviderRef.current === 'nvidia') {
+        if (sttProviderRef.current === 'nvidia' || sttProviderRef.current === 'local') {
             const cmd = translationEnabled ? `TRANSLATE:${translationLang}` : 'TRANSLATE:off';
             if (isTauri && audioSource === 'both') {
                 // Tauri event payload must be JSON-encoded string for serde
@@ -524,7 +524,7 @@ export function RecordingBar() {
                 // ALL WS bases rejected — usually sidecar offline or WS handshake
                 // refused (firewall, port collision). Tell the user why instead
                 // of silently downgrading to file-chunk mode and looking broken.
-                const providerName = sttProvider === 'soniox' ? 'Soniox' : 'Nvidia';
+                const providerName = sttProvider === 'soniox' ? 'Soniox' : sttProvider === 'local' ? 'Local STT' : 'Nvidia';
                 showToast(
                     lang === 'vi'
                         ? `Không kết nối được tới ${providerName}. Đang chuyển sang chế độ chunk (chậm hơn). Kiểm tra mạng / API Key trong Cài đặt.`

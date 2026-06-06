@@ -660,7 +660,11 @@ async fn system_audio_ws_loop<F>(
     use futures_util::{SinkExt, StreamExt};
 
     // Build WS URL based on STT provider
-    let ws_path = if stt_provider == "soniox" { "/ws/soniox-stream" } else { "/ws/nvidia-stream" };
+    let ws_path = match stt_provider {
+        "soniox" => "/ws/soniox-stream",
+        "local" => "/ws/local-stream",
+        _ => "/ws/nvidia-stream",
+    };
     let mut url = format!("ws://127.0.0.1:8765{}?source=system", ws_path);
     if let Some(mid) = meeting_id {
         url.push_str(&format!("&meeting_id={}", mid));

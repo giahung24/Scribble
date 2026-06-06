@@ -18,3 +18,6 @@ onnxruntime>=1.17.0
 # instead (see _ffprobe_duration in upload_pipeline.py).
 imageio-ffmpeg>=0.5.1
 pyinstaller>=6.0
+# ── Dev/test only (not bundled by PyInstaller) ──
+pytest>=8.0
+pytest-asyncio>=0.23

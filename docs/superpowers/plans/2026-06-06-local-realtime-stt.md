@@ -284,7 +284,8 @@ def test_session_yields_interim_then_final_with_pcm():
     assert len(finals) == 1
     assert finals[0]["text"] == "hello world"
     assert isinstance(finals[0]["pcm"], (bytes, bytearray))  # PCM passed for diarization
-    assert provider.calls == [(provider.calls[0][0], "en")]  # transcribed once, with language
+    assert len(provider.calls) == 1
+    assert provider.calls[0][1] == "en"  # transcribed once, with the session language
 
 
 def test_session_transcribes_trailing_tail_on_stop():
@@ -533,7 +534,7 @@ git commit -m "feat(stt): local provider opens realtime sessions"
 
 - [ ] **Step 1: Add the handler**
 
-Add the following to `src-python/main.py`, immediately after the `soniox_stream_ws` function ends (find it with `grep -n 'def soniox_stream_ws' src-python/main.py` and insert after that function's final line):
+Add the following to `src-python/main.py` as a **new module-level function** (same indentation as the other `@app.websocket(...)` handlers — NOT nested inside another function). Locate the end of `soniox_stream_ws` with `grep -n 'def soniox_stream_ws' src-python/main.py`, then insert after that function's body (the next top-level `@app...` or `def` marks the boundary):
 
 ```python
 # ─── Local (OpenAI-compatible Whisper) Pseudo-Realtime WebSocket ───
@@ -631,6 +632,13 @@ async def local_stream_ws(websocket: WebSocket):
         SAVE_INTERVAL = 10.0
 
         def _accumulate_part(text, speaker, speaker_id, chunk_id):
+            # Simpler than the Nvidia handler's _accumulate_part on purpose: the
+            # Nvidia path carries chunkData/chunkIds to REPLACE in-progress interim
+            # text in place. Local emits finals only (no interim text to replace),
+            # so a part needs just {text, speaker, speakerId, chunkId}. This is a
+            # subset of the Nvidia persisted shape and renders identically on
+            # reopen — TranscriptPart treats chunkIds as optional, and the
+            # translation matcher checks `chunkId === chunk_id` as well as chunkIds.
             if not text.strip():
                 return
             if transcript_parts and transcript_parts[-1].get("speakerId") == speaker_id:

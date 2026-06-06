@@ -137,3 +137,13 @@ def test_provider_strips_trailing_v1_and_slash():
 def test_provider_plain_base_url_unchanged():
     p = LocalOpenAIProvider("http://host:9000", "whisper-1")
     assert p.base_url == "http://host:9000"
+
+
+def test_provider_supports_realtime_and_opens_session():
+    from stt_providers.local_openai import LocalOpenAIProvider
+    from stt_providers.local_realtime import LocalRealtimeSession
+    p = LocalOpenAIProvider("http://localhost:8000", "whisper-1")
+    assert p.supports_realtime is True
+    session = p.open_session("en")
+    assert isinstance(session, LocalRealtimeSession)
+    assert session._language == "en"

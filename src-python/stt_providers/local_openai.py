@@ -62,7 +62,7 @@ def _parse_transcription_response(payload: dict) -> list[STTSegment]:
 class LocalOpenAIProvider(STTProvider):
     name = "local"
     supports_batch = True
-    supports_realtime = False   # v2
+    supports_realtime = True    # v2: pseudo-realtime via VAD-chunked batch
     native_diarization = False  # batch pipeline layers CAM++
     native_translation = False
 
@@ -88,3 +88,9 @@ class LocalOpenAIProvider(STTProvider):
                               timeout=self.timeout)
         resp.raise_for_status()
         return _parse_transcription_response(resp.json())
+
+    def open_session(self, language: str, **opts):
+        """Realtime session — buffers live PCM and transcribes utterances
+        through this same provider's batch endpoint. See LocalRealtimeSession."""
+        from .local_realtime import LocalRealtimeSession
+        return LocalRealtimeSession(self, language)

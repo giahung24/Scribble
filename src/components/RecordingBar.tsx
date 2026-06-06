@@ -365,6 +365,20 @@ export function RecordingBar() {
                     useAppStore.getState().setSettingsOpen(true);
                     return;
                 }
+                if (provider === 'local') {
+                    const baseUrl = (settings.local_stt_base_url || '').trim();
+                    const model = (settings.local_stt_model || '').trim();
+                    if (!baseUrl || !model) {
+                        showToast(
+                            lang === 'vi'
+                                ? 'Vui lòng cấu hình Local STT (Base URL + Model) trong Cài đặt trước khi ghi âm'
+                                : 'Please configure Local STT (Base URL + Model) in Settings before recording',
+                            'error'
+                        );
+                        useAppStore.getState().setSettingsOpen(true);
+                        return;
+                    }
+                }
             } catch (e) {
                 // Backend not ready — overlay should be showing, but guard anyway
                 showToast(

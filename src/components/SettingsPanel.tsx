@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { checkForUpdates } from '../lib/updater';
-import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api';
+import { getSettings, saveSettings, diagnose, fetchLLMModels, fetchSttModels } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -11,11 +11,17 @@ import { useToast } from './Toast';
 export function SettingsPanel() {
     const { setSettingsOpen, lang } = useAppStore();
     const { showToast } = useToast();
-    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox'>('nvidia');
+    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'local'>('nvidia');
     const [nvidiaKey, setNvidiaKey] = useState('');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
     const [nvidiaLang, setNvidiaLang] = useState('vi');
+    const [localBaseUrl, setLocalBaseUrl] = useState('');
+    const [localModel, setLocalModel] = useState('');
+    const [localKey, setLocalKey] = useState('');
+    const [showLocalKey, setShowLocalKey] = useState(false);
+    const [sttModelOptions, setSttModelOptions] = useState<string[]>([]);
+    const [fetchingSttModels, setFetchingSttModels] = useState(false);
     const [llmKey, setLlmKey] = useState('');
     const [llmUrl, setLlmUrl] = useState('');
     const [llmModel, setLlmModel] = useState('');
@@ -91,7 +97,7 @@ export function SettingsPanel() {
     const loadSettings = async () => {
         try {
             const s = await getSettings();
-            setSttProvider((s.stt_provider as 'nvidia' | 'soniox') || 'nvidia');
+            setSttProvider((s.stt_provider as 'nvidia' | 'soniox' | 'local') || 'nvidia');
             if (s.nvidia_api_key) setNvidiaKey('••••••••');
             if (s.soniox_api_key) setSonioxKey('••••••••');
             if (s.soniox_language_hints) {
@@ -99,6 +105,9 @@ export function SettingsPanel() {
                 if (hints.length > 0) setSonioxLangs(new Set(hints));
             }
             setNvidiaLang(s.stt_language || 'vi');
+            if (s.local_stt_base_url) setLocalBaseUrl(s.local_stt_base_url);
+            if (s.local_stt_model) setLocalModel(s.local_stt_model);
+            if (s.local_stt_api_key) setLocalKey('••••••••');
             if (s.max_speakers) setMaxSpeakers(parseInt(s.max_speakers) || 4);
             if (s.llm_api_key) setLlmKey('••••••••');
             if (s.llm_base_url) setLlmUrl(s.llm_base_url);
@@ -125,6 +134,9 @@ export function SettingsPanel() {
         if (!sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
         body.stt_language = nvidiaLang;
         body.soniox_language_hints = Array.from(sonioxLangs).join(',');
+        body.local_stt_base_url = localBaseUrl;
+        body.local_stt_model = localModel;
+        if (!localKey.includes('•')) body.local_stt_api_key = localKey;
         body.max_speakers = maxSpeakers;
         if (!llmKey.includes('•')) body.llm_api_key = llmKey;
         if (llmProvider === 'compatible') {
@@ -158,6 +170,26 @@ export function SettingsPanel() {
             showToast(lang === 'vi' ? `Lỗi kết nối: ${msg}` : `Connection error: ${msg}`, 'error');
         }
         setFetchingModels(false);
+    };
+
+    const handleFetchSttModels = async () => {
+        if (!localBaseUrl.trim()) return;
+        setFetchingSttModels(true);
+        setSttModelOptions([]);
+        try {
+            const result = await fetchSttModels(localBaseUrl, localKey);
+            if (result.error) {
+                showToast(lang === 'vi' ? `Lỗi lấy model: ${result.error}` : `Fetch error: ${result.error}`, 'error');
+            } else if (result.models && result.models.length > 0) {
+                setSttModelOptions(result.models);
+            } else {
+                showToast(lang === 'vi' ? 'Server không trả model — nhập tay tên model' : 'Server returned no models — type the model name', 'warning');
+            }
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast(lang === 'vi' ? `Lỗi kết nối: ${msg}` : `Connection error: ${msg}`, 'error');
+        }
+        setFetchingSttModels(false);
     };
 
     const testAll = async () => {
@@ -349,6 +381,13 @@ export function SettingsPanel() {
                                     <strong>Soniox</strong>
                                     <span className="provider-tab-desc">{t('soniox_desc', lang)}</span>
                                 </button>
+                                <button
+                                    className={`provider-tab${sttProvider === 'local' ? ' active' : ''}`}
+                                    onClick={() => setSttProvider('local')}
+                                >
+                                    <strong>Local (Whisper)</strong>
+                                    <span className="provider-tab-desc">{lang === 'vi' ? 'Tự host, riêng tư' : 'Self-hosted, private'}</span>
+                                </button>
                             </div>
                             {sttProvider === 'soniox' && (
                                 <div className="setting-warning">
@@ -364,7 +403,7 @@ export function SettingsPanel() {
                         </div>
 
                         {/* API Key — span full so the long input row breathes */}
-                        <div className="setting-group setting-group--full">
+                        {sttProvider !== 'local' && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasApiKey} />
@@ -391,10 +430,10 @@ export function SettingsPanel() {
                                 </button>
                             </div>
                             <div className="setting-hint">{t('signup_free_at', lang)} <a href={signupHref} target="_blank" rel="noreferrer">{signupUrl}</a></div>
-                        </div>
+                        </div>}
 
                         {/* Language Selection — dropdown */}
-                        <div className="setting-group">
+                        {sttProvider !== 'local' && <div className="setting-group">
                             <div className="setting-label">
                                 {t(sttProvider === 'soniox' ? 'soniox_languages' : 'primary_language', lang)}
                             </div>
@@ -428,10 +467,10 @@ export function SettingsPanel() {
                                     ? t('language_hint', lang)
                                     : t('soniox_languages_hint', lang)}
                             </div>
-                        </div>
+                        </div>}
 
-                        {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
-                        {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
+                        {/* Max Speakers — only for Nvidia and Local (Soniox has built-in diarization) */}
+                        {sttProvider !== 'soniox' && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
                             </div>
@@ -452,6 +491,87 @@ export function SettingsPanel() {
                                     : 'Maximum number of speakers to detect per meeting'}
                             </div>
                         </div>}
+
+                        {sttProvider === 'local' && <>
+                            <div className="setting-group setting-group--full">
+                                <div className="setting-label" style={{ textTransform: 'uppercase' }}>Base URL</div>
+                                <input
+                                    type="text"
+                                    className="setting-input"
+                                    value={localBaseUrl}
+                                    onChange={(e) => { setLocalBaseUrl(e.target.value); setSttModelOptions([]); }}
+                                    placeholder="http://localhost:9000"
+                                />
+                                <div className="setting-hint">
+                                    {lang === 'vi'
+                                        ? 'Server tương thích OpenAI (faster-whisper-server, whisper.cpp, Speaches…). Whisper large-v3 cho chất lượng tiếng Việt tốt nhất.'
+                                        : 'OpenAI-compatible server (faster-whisper-server, whisper.cpp, Speaches…). Whisper large-v3 gives the best Vietnamese quality.'}
+                                </div>
+                            </div>
+
+                            <div className="setting-group setting-group--full">
+                                <div className="setting-label">
+                                    API Key
+                                    <ConfigBadge ok={localKey.length > 0} optional />
+                                </div>
+                                <div className="setting-input-wrap">
+                                    <input
+                                        type={showLocalKey ? 'text' : 'password'}
+                                        className="setting-input"
+                                        value={localKey}
+                                        onChange={(e) => setLocalKey(e.target.value)}
+                                        placeholder={lang === 'vi' ? '(tùy chọn)' : '(optional)'}
+                                    />
+                                    <button type="button" className="setting-eye-btn" onClick={() => setShowLocalKey(v => !v)} aria-label="toggle key">
+                                        {showLocalKey ? (
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" x2="23" y1="1" y2="23"/></svg>
+                                        ) : (
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="setting-group">
+                                <div className="setting-label" style={{ textTransform: 'uppercase' }}>
+                                    Model <ConfigBadge ok={localModel.length > 0} />
+                                </div>
+                                <CustomSelect
+                                    options={fetchingSttModels
+                                        ? [{ value: '', label: lang === 'vi' ? 'Đang tải...' : 'Loading...' }]
+                                        : (sttModelOptions.length > 0
+                                            ? sttModelOptions.map(m => ({ value: m, label: m }))
+                                            : (localModel ? [{ value: localModel, label: localModel }] : [{ value: '', label: lang === 'vi' ? '-- Bấm để tải / nhập tay --' : '-- Click to load / type --' }]))}
+                                    value={fetchingSttModels ? '' : localModel}
+                                    onChange={setLocalModel}
+                                    disabled={fetchingSttModels || localBaseUrl.trim().length === 0}
+                                    onOpen={() => {
+                                        if (localBaseUrl.trim() && sttModelOptions.length === 0 && !fetchingSttModels) {
+                                            handleFetchSttModels();
+                                        }
+                                    }}
+                                />
+                                <input
+                                    type="text"
+                                    className="setting-input"
+                                    style={{ marginTop: '6px' }}
+                                    value={localModel}
+                                    onChange={(e) => setLocalModel(e.target.value)}
+                                    placeholder={lang === 'vi' ? 'hoặc nhập tên model (vd: large-v3)' : 'or type model name (e.g. large-v3)'}
+                                />
+                            </div>
+
+                            <div className="setting-group">
+                                <div className="setting-label">{t('primary_language', lang)}</div>
+                                <CustomSelect
+                                    className="setting-lang-select"
+                                    options={sonioxLanguages}
+                                    value={nvidiaLang}
+                                    onChange={setNvidiaLang}
+                                />
+                                <div className="setting-hint">{t('language_hint', lang)}</div>
+                            </div>
+                        </>}
                     </div>
 
                     {/* ── LLM Section ── */}

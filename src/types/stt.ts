@@ -64,6 +64,9 @@ export interface SettingsData {
     llm_provider?: string;
     llm_model?: string;
     app_language?: string;
+    local_stt_base_url?: string;
+    local_stt_model?: string;
+    local_stt_api_key?: string;
     [key: string]: string | undefined;
 }
 

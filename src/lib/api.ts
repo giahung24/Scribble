@@ -348,3 +348,13 @@ export const fetchLLMModels = (
     return request<{ models: string[]; error?: string }>(`/models?${params}`);
 };
 
+// ─── STT Models (local/self-hosted) ───
+export const fetchSttModels = (
+    baseUrl: string,
+    apiKey?: string,
+): Promise<{ models: string[]; error?: string }> => {
+    const params = new URLSearchParams({ base_url: baseUrl });
+    if (apiKey && !apiKey.includes('•')) params.set('api_key', apiKey);
+    return request<{ models: string[]; error?: string }>(`/stt-models?${params}`);
+};
+

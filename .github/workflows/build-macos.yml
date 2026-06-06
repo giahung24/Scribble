@@ -205,16 +205,25 @@ jobs:
           npx tauri build --target aarch64-apple-darwin \
             --config "{\"bundle\":{\"macOS\":{\"signingIdentity\":\"$IDENTITY\"}}}"
 
-      - name: Get version from tag
+      - name: Resolve version
         id: version
+        # Tag pushes (v1.2.3) → strip the leading "v". Branch / manual runs have
+        # no version in the ref, so fall back to package.json — otherwise VERSION
+        # becomes the branch name and the upload filename gets a "/" in it
+        # (e.g. Scribble_feat/x_aarch64.dmg → cp fails). Matches build.yml.
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF_NAME#v}
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Ensure release exists
         # First of the 3 parallel platform builds wins the race + creates the
         # draft; the rest no-op. See build.yml for the rationale.
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           gh release view "$TAG" >/dev/null 2>&1 || \
@@ -224,7 +233,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload to Release
+      - name: Upload to Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
@@ -263,3 +273,18 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload as artifact (manual run)
+        # On branch / manual (workflow_dispatch) runs there's no release to push
+        # to, so expose the bundle on the Actions run page instead. Mirrors
+        # build.yml. Original tauri filenames are kept (not renamed).
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scribble-macos-aarch64
+          path: |
+            src-tauri/target/aarch64-apple-darwin/**/*.dmg
+            src-tauri/target/aarch64-apple-darwin/**/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/**/*.app.tar.gz.sig
+          retention-days: 30
+          if-no-files-found: warn

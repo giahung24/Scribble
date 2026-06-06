@@ -121,6 +121,7 @@ class OnDeviceStreamingSession:
                         self._emit_final(self._asr.endpoint(), bytes(seg_pcm))
                         seg_pcm = bytearray()
                         trailing_silence = 0
+                        residual = b""
                 except Exception:  # noqa: BLE001 — one bad chunk must not kill the session
                     log.warning("[ondevice] worker chunk error", exc_info=True)
                     continue

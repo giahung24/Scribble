@@ -13,8 +13,6 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
-# faster-whisper accepts these size names directly (it maps to Systran CT2 repos).
-WHISPER_SIZES = ("small", "medium", "large-v3")
 NLLB_REPO = "facebook/nllb-200-distilled-600M"
 
 

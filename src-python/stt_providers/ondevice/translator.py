@@ -66,7 +66,7 @@ class NllbTranslator:
         import ctranslate2
         from transformers import AutoTokenizer
         translator = ctranslate2.Translator(str(model_dir), device=device, compute_type=compute_type)
-        tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
         return cls(translator, tokenizer)
 
     def translate(self, text: str, src: str, tgt: str) -> str:

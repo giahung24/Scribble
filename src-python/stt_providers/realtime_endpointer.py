@@ -87,9 +87,11 @@ class StreamingEndpointer:
                     cut = self._close_utterance()
                     if cut is not None:
                         out.append(cut)
-                    continue
             # else: leading silence before any speech — drop it
 
+            # Hard cap. Runs for every frame that left us mid-utterance. (After a
+            # silence-gap cut above, _close_utterance cleared _in_speech, so this
+            # is correctly a no-op in that case.)
             if self._in_speech and self._utterance_ms() >= self.max_utterance_ms:
                 cut = self._close_utterance()
                 if cut is not None:

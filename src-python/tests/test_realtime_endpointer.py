@@ -1,4 +1,6 @@
 """Unit tests for the streaming utterance endpointer."""
+import array
+
 from stt_providers.realtime_endpointer import StreamingEndpointer
 
 SR = 16000
@@ -6,7 +8,6 @@ SR = 16000
 
 def _pcm(ms: int, amplitude: int) -> bytes:
     """Build `ms` milliseconds of constant-amplitude int16 mono PCM."""
-    import array
     n = int(SR * ms / 1000)
     return array.array("h", [amplitude] * n).tobytes()
 
@@ -51,3 +52,16 @@ def test_flush_returns_pending_tail():
     tail = ep.flush()
     assert tail is not None
     assert (len(tail) // 2) >= SR  # ~1.2s
+
+
+def test_residual_stitching_across_feeds():
+    """Bytes split across feed() calls (incl. odd sizes) must still produce
+    the same single utterance as one contiguous feed."""
+    ep = StreamingEndpointer(sample_rate=SR)
+    blob = _speech(1500) + _silence(700)
+    out = []
+    # feed in irregular, deliberately frame-misaligned slices (incl. odd byte)
+    for chunk in (blob[:101], blob[101:5000], blob[5000:5001], blob[5001:]):
+        out.extend(ep.feed(chunk))
+    assert len(out) == 1
+    assert (len(out[0]) // 2) >= SR * 1.4

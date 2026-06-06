@@ -13,7 +13,7 @@ router = APIRouter()
 db = Database()
 
 # Keys that should be masked in GET /settings response
-_SENSITIVE_KEYS = frozenset({"nvidia_api_key", "llm_api_key", "soniox_api_key"})
+_SENSITIVE_KEYS = frozenset({"nvidia_api_key", "llm_api_key", "soniox_api_key", "local_stt_api_key"})
 
 # Provider → base URL mapping
 _PROVIDER_URLS: dict[str, str] = {
@@ -102,4 +102,26 @@ async def list_models(
         return {"models": ids}
     except Exception as e:
         log.warning("[models] fetch failed: %s", e)
+        return {"error": str(e), "models": []}
+
+
+@router.get("/stt-models")
+async def list_stt_models(
+    base_url: str = Query(...),
+    api_key: str = Query(default=""),
+):
+    """List models from a local OpenAI-compatible transcription server.
+    Best-effort: many Whisper servers don't implement /v1/models — callers
+    fall back to free-text model entry on error."""
+    url = base_url.rstrip("/") + "/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+        return {"models": models}
+    except Exception as e:  # noqa: BLE001 — surface any failure as graceful fallback
+        log.warning("[settings] /stt-models failed: %s", e)
         return {"error": str(e), "models": []}

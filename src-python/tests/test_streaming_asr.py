@@ -38,6 +38,7 @@ def test_endpoint_commits_remaining_and_resets():
     asr.feed(np.zeros(16000, dtype=np.int16).tobytes())  # agreement commits both
     final_words = asr.endpoint()
     assert [w[0] for w in final_words] == ["hello", "world"]
-    # after endpoint, buffer + policy reset → fresh partial
-    _, partial = asr.feed(np.zeros(16000, dtype=np.int16).tobytes())
-    assert isinstance(partial, list)
+    # after endpoint, buffer + policy reset → fresh partial, no stale commit
+    committed, partial = asr.feed(np.zeros(16000, dtype=np.int16).tobytes())
+    assert committed == []
+    assert [w[0] for w in partial] == ["hello", "world"]

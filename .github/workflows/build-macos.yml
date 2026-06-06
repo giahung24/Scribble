@@ -106,9 +106,9 @@ jobs:
         # secret is empty, outputs identity="-" so the build falls back to
         # ad-hoc signing. See docs/auto-update.md for setup instructions.
         id: signing
-        env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        # env:
+        #   MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+        #   MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           if [ -z "$MACOS_CERTIFICATE_P12" ]; then
             echo "identity=-" >> "$GITHUB_OUTPUT"

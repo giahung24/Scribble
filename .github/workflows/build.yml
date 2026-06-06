@@ -90,9 +90,9 @@ jobs:
         # a `.sig` file next to the NSIS installer — required by the updater on
         # the client side. If the secret isn't set yet, the build still
         # succeeds but produces no signature (auto-update won't verify).
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # env:
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
 
       - name: Resolve version + installer

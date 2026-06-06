@@ -11,8 +11,8 @@ class STTSegment:
     no timestamps. speaker_id is None unless the provider diarizes natively
     (the batch pipeline assigns speakers via CAM++ when it's None)."""
     text: str
-    start_ms: int | None
-    end_ms: int | None
+    start_ms: int | None = None
+    end_ms: int | None = None
     speaker_id: int | None = None
     is_final: bool = True
     language: str | None = None

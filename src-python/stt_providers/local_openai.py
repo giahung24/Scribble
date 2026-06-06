@@ -13,6 +13,19 @@ from .base import STTProvider, STTSegment
 _DEFAULT_TIMEOUT = 300.0
 
 
+def normalize_base_url(url: str) -> str:
+    """Normalize a user-entered base URL to the server root.
+
+    Strips trailing slashes and a single trailing '/v1' segment, so that both
+    'http://host:9000' and 'http://host:9000/v1' work — the app's LLM config
+    convention includes '/v1', so users often paste it here too. Callers then
+    append '/v1/audio/transcriptions' or '/v1/models' themselves."""
+    u = (url or "").strip().rstrip("/")
+    if u.endswith("/v1"):
+        u = u[: -len("/v1")]
+    return u
+
+
 def _parse_transcription_response(payload: dict) -> list[STTSegment]:
     """Map an OpenAI-style transcription response to STTSegment[].
 
@@ -55,7 +68,7 @@ class LocalOpenAIProvider(STTProvider):
 
     def __init__(self, base_url: str, model: str, api_key: str = "",
                  timeout: float = _DEFAULT_TIMEOUT):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = normalize_base_url(base_url)
         self.model = model
         self.api_key = api_key or ""
         self.timeout = timeout

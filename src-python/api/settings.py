@@ -7,6 +7,7 @@ import httpx
 
 from db import Database
 from logger import get_logger
+from stt_providers.local_openai import normalize_base_url
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -113,10 +114,10 @@ async def list_stt_models(
     """List models from a local OpenAI-compatible transcription server.
     Best-effort: many Whisper servers don't implement /v1/models — callers
     fall back to free-text model entry on error."""
-    url = base_url.rstrip("/") + "/v1/models"
+    url = normalize_base_url(base_url) + "/v1/models"
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             r = await client.get(url, headers=headers)
             r.raise_for_status()
             data = r.json()

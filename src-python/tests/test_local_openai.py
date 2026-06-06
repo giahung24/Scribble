@@ -122,3 +122,18 @@ def test_parse_segment_without_timestamps():
     segs = _parse_transcription_response({"segments": [{"text": "hi"}]})
     assert len(segs) == 1
     assert segs[0].start_ms is None and segs[0].end_ms is None
+
+
+def test_provider_strips_trailing_v1():
+    p = LocalOpenAIProvider("http://host:9000/v1", "whisper-1")
+    assert p.base_url == "http://host:9000"
+
+
+def test_provider_strips_trailing_v1_and_slash():
+    p = LocalOpenAIProvider("http://host:9000/v1/", "whisper-1")
+    assert p.base_url == "http://host:9000"
+
+
+def test_provider_plain_base_url_unchanged():
+    p = LocalOpenAIProvider("http://host:9000", "whisper-1")
+    assert p.base_url == "http://host:9000"

@@ -160,6 +160,9 @@ npx tauri build
 |---------|----------|---------|---------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, 13+ ngôn ngữ, speaker diarization, Parakeet CTC 0.6B cho tiếng Việt | API key từ [build.nvidia.com](https://build.nvidia.com) | Free tier hào phóng |
 | 🎯 **Soniox** | Chất lượng tốt nhất, đa ngôn ngữ trong cùng 1 audio, diarization tích hợp | API key từ [soniox.com](https://soniox.com) | ~$0.12/giờ |
+| 💻 **Local (Whisper)** | Tự host, riêng tư 100%, không tốn phí API. Chỉ hỗ trợ Upload file (batch) ở phiên bản này | Server tương thích OpenAI (faster-whisper-server / whisper.cpp / Speaches) chạy local | Miễn phí (tự host) |
+
+> **Local STT (v1):** trỏ Settings → STT → Local vào Base URL của server transcription tương thích OpenAI. Model khuyến nghị: Whisper `large-v3` cho tiếng Việt. Ghi âm realtime và dịch cabin với provider local sẽ có ở phiên bản sau.
 
 > 🔒 **Bảo mật:** API key của bạn được lưu trữ **hoàn toàn trên máy tính của bạn**. Chúng tôi không thu thập, gửi đi hay sử dụng API key của bạn cho bất kỳ mục đích nào.
 
@@ -362,6 +365,9 @@ npx tauri build
 |---------|------------|--------------|------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, 13+ languages, speaker diarization, Parakeet CTC 0.6B for Vietnamese | API key from [build.nvidia.com](https://build.nvidia.com) | Generous free tier |
 | 🎯 **Soniox** | Best-in-class accuracy, multi-lang mixed audio, built-in diarization | API key from [soniox.com](https://soniox.com) | ~$0.12/hr |
+| 💻 **Local (Whisper)** | Self-hosted, fully private, no API cost. Upload (batch) only in this version | An OpenAI-compatible server (faster-whisper-server / whisper.cpp / Speaches) running locally | Free (self-hosted) |
+
+> **Local STT (v1):** point Settings → STT → Local at your OpenAI-compatible transcription server's Base URL. Recommended model: Whisper `large-v3` for Vietnamese. Realtime recording and cabin translation with the local provider are planned for a later version.
 
 > 🔒 **Privacy:** Your API keys are stored **entirely on your local machine**. We never collect, transmit, or use your API keys for any purpose.
 

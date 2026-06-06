@@ -35,4 +35,18 @@ def test_session_streams_partials_then_final_and_terminates():
 def test_session_stop_without_audio_terminates():
     session = OnDeviceStreamingSession(asr=_FakeASR(), translate=None, sample_rate=SR)
     session.start(); session.stop()
-    assert list(session.results()) == [] or list(session.results()) is not None
+    assert list(session.results()) == []
+
+def test_session_terminates_when_asr_raises():
+    """A throwing ASR must NOT hang results() — the worker catches per-chunk,
+    flushes, and the finally still emits the terminating None."""
+    class _BoomASR:
+        def feed(self, pcm):
+            raise RuntimeError("boom")
+        def endpoint(self):
+            return []
+    session = OnDeviceStreamingSession(asr=_BoomASR(), translate=None, sample_rate=SR)
+    session.start()
+    session.feed_audio(_speech(1000))
+    session.stop()
+    assert list(session.results()) == []   # terminates, does not hang

@@ -13,6 +13,10 @@ import math
 import queue
 import threading
 
+from logger import get_logger
+
+log = get_logger(__name__)
+
 _SR_BYTES = 2
 _SENTINEL = object()
 
@@ -87,31 +91,43 @@ class OnDeviceStreamingSession:
         trailing_silence = 0
         seg_pcm = bytearray()
         residual = b""
-        while True:
-            item = self._in_q.get()
-            if item is _SENTINEL:
-                final = self._asr.endpoint()
-                self._emit_final(final, bytes(seg_pcm))
-                break
-            seg_pcm.extend(item)
-            committed, partial = self._asr.feed(item)
-            if partial or committed:
-                preview = " ".join(w[0] for w in (list(committed) + list(partial))).strip()
-                if preview:
-                    self._out_q.put({"text": preview, "is_final": False})
-            # endpoint detection on trailing silence
-            data = residual + item
-            i = 0
-            while i + self._frame_bytes <= len(data):
-                frame = data[i:i + self._frame_bytes]; i += self._frame_bytes
-                if _rms(frame) < self._silence_rms:
-                    trailing_silence += 1
-                else:
-                    trailing_silence = 0
-            residual = data[i:]
-            if trailing_silence >= self._silence_frames_needed:
-                final = self._asr.endpoint()
-                self._emit_final(final, bytes(seg_pcm))
-                seg_pcm = bytearray()
-                trailing_silence = 0
-        self._out_q.put(None)
+        try:
+            while True:
+                try:
+                    item = self._in_q.get(timeout=0.5)
+                except queue.Empty:
+                    if self._stopped:
+                        break
+                    continue
+                if item is _SENTINEL:
+                    break
+                try:
+                    seg_pcm.extend(item)
+                    committed, partial = self._asr.feed(item)
+                    if partial or committed:
+                        preview = " ".join(w[0] for w in (list(committed) + list(partial))).strip()
+                        if preview:
+                            self._out_q.put({"text": preview, "is_final": False})
+                    data = residual + item
+                    i = 0
+                    while i + self._frame_bytes <= len(data):
+                        frame = data[i:i + self._frame_bytes]; i += self._frame_bytes
+                        if _rms(frame) < self._silence_rms:
+                            trailing_silence += 1
+                        else:
+                            trailing_silence = 0
+                    residual = data[i:]
+                    if trailing_silence >= self._silence_frames_needed:
+                        self._emit_final(self._asr.endpoint(), bytes(seg_pcm))
+                        seg_pcm = bytearray()
+                        trailing_silence = 0
+                except Exception:  # noqa: BLE001 — one bad chunk must not kill the session
+                    log.warning("[ondevice] worker chunk error", exc_info=True)
+                    continue
+            # flush any remaining segment on shutdown (sentinel or _stopped)
+            try:
+                self._emit_final(self._asr.endpoint(), bytes(seg_pcm))
+            except Exception:  # noqa: BLE001
+                log.warning("[ondevice] endpoint flush error", exc_info=True)
+        finally:
+            self._out_q.put(None)  # ALWAYS terminate results(), even on fatal error

@@ -1438,6 +1438,49 @@ def _normalize_to_wav(source: Path, target: Path) -> None:
         )
 
 
+def _resolve_chunk_transcriber(db_):
+    """Resolve a per-chunk transcribe callable (path -> text) + provider name
+    from settings. Centralizes provider routing for the batch chunked path."""
+    provider = (db_.get_setting("stt_provider") or "nvidia").strip().lower()
+    if provider not in ("nvidia", "soniox", "local"):
+        provider = "nvidia"
+
+    if provider == "nvidia":
+        nvidia_key = (
+            db_.get_setting("nvidia_api_key")
+            or os.environ.get("NVIDIA_API_KEY", "")
+        )
+        if not nvidia_key:
+            raise RuntimeError(
+                "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
+            )
+        riva_lang = get_language_code(db_.get_setting("stt_language") or "vi")
+
+        def _t(path: str) -> str:
+            return transcribe_nvidia_streaming(path, nvidia_key, riva_lang)
+        return _t, provider
+
+    if provider == "soniox":
+        soniox_key = (
+            db_.get_setting("soniox_api_key")
+            or os.environ.get("SONIOX_API_KEY", "")
+        )
+        if not soniox_key:
+            raise RuntimeError(
+                "Soniox API key chưa được cấu hình. Vào Settings → Soniox API Key."
+            )
+        hints_raw = db_.get_setting("soniox_language_hints") or "vi"
+        soniox_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
+
+        def _t(path: str) -> str:
+            return transcribe_soniox_file(path, soniox_key, soniox_hints)
+        return _t, provider
+
+    # local — OpenAI-compatible transcription endpoint (validation inside)
+    from stt_providers.registry import build_local_transcriber
+    return build_local_transcriber(db_), provider
+
+
 async def _process_chunks_parallel(
     job: JobState,
     chunks: list[AudioChunk],
@@ -1459,39 +1502,8 @@ async def _process_chunks_parallel(
         return []
 
     # ── STT provider routing ────────────────────────────────────────────
-    # Earlier this hardcoded Nvidia and ignored the user's Settings choice
-    # — uploading on a Soniox-configured app still ran Riva, producing
-    # "[stt:nvidia-stream-batch] Parakeet …" in the log no matter what.
-    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
-    if stt_provider not in ("nvidia", "soniox"):
-        stt_provider = "nvidia"
-
-    if stt_provider == "nvidia":
-        nvidia_key = (
-            db.get_setting("nvidia_api_key")
-            or os.environ.get("NVIDIA_API_KEY", "")
-        )
-        if not nvidia_key:
-            raise RuntimeError(
-                "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
-            )
-        stt_lang = db.get_setting("stt_language") or "vi"
-        riva_lang = get_language_code(stt_lang)
-        soniox_key = ""
-        soniox_hints: list[str] = []
-    else:
-        soniox_key = (
-            db.get_setting("soniox_api_key")
-            or os.environ.get("SONIOX_API_KEY", "")
-        )
-        if not soniox_key:
-            raise RuntimeError(
-                "Soniox API key chưa được cấu hình. Vào Settings → Soniox API Key."
-            )
-        hints_raw = db.get_setting("soniox_language_hints") or "vi"
-        soniox_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
-        nvidia_key = ""
-        riva_lang = ""
+    # Resolve a per-chunk transcribe callable from the user's Settings choice.
+    transcribe_fn, stt_provider = _resolve_chunk_transcriber(db)
     log.info("[pipeline] STT provider: %s", stt_provider)
 
     diarizer = None
@@ -1510,17 +1522,9 @@ async def _process_chunks_parallel(
             if _is_cancelled(job):
                 return
 
-            # Dispatch to the configured provider. Nvidia uses streaming gRPC
-            # (offline_recognize unavailable for vi/zh). Soniox uses the
-            # async file API (stt-async-v4) with auto-cleanup.
-            if stt_provider == "nvidia":
-                stt_task = asyncio.to_thread(
-                    transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
-                )
-            else:
-                stt_task = asyncio.to_thread(
-                    transcribe_soniox_file, str(chunk.path), soniox_key, soniox_hints
-                )
+            # Transcribe via the resolved provider callable (nvidia=gRPC,
+            # soniox=async file API, local=OpenAI-compatible HTTP).
+            stt_task = asyncio.to_thread(transcribe_fn, str(chunk.path))
             emb_task = (
                 asyncio.to_thread(extract_embedding, diarizer, chunk.path)
                 if diarizer is not None

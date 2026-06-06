@@ -27,18 +27,11 @@
       "csp": "default-src 'self'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: http://localhost:8765 http://127.0.0.1:8765; img-src 'self' data: blob:"
     }
   },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/luongndcoder/Scribble/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1NEE5RjRDOEQ2OTU2RTgKUldUb1ZtbU5USjlLbFgyV2FFMVhFcmVLMHlvcUtHUWV5WUpDcVlCN2RXaFB3U29TZFFUQ280MFkK"
-    }
-  },
+  "plugins": {},
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -114,6 +114,10 @@ async def list_stt_models(
     """List models from a local OpenAI-compatible transcription server.
     Best-effort: many Whisper servers don't implement /v1/models — callers
     fall back to free-text model entry on error."""
+    # Fall back to the stored key when the caller sends none or a masked value
+    # (the Settings UI shows the saved key as bullets and omits it on fetch).
+    if not api_key or "•" in api_key:
+        api_key = db.get_setting("local_stt_api_key") or ""
     url = normalize_base_url(base_url) + "/v1/models"
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:

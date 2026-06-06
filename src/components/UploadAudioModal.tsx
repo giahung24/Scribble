@@ -47,7 +47,7 @@ import { useToast } from './Toast';
 async function checkSttProviderConfigured(): Promise<{
     ok: boolean;
     provider: string;
-    missing: 'nvidia' | 'soniox' | null;
+    missing: 'nvidia' | 'soniox' | 'local' | null;
 }> {
     try {
         const settings = await getSettings();
@@ -59,6 +59,15 @@ async function checkSttProviderConfigured(): Promise<{
             if (v.includes('***')) return true;
             return true;
         };
+        // Local (self-hosted Whisper) needs no API key — it needs a Base URL +
+        // model. Validate those instead, matching the sidecar's
+        // build_local_provider() which raises if either is unset.
+        if (provider === 'local') {
+            const baseUrl = (settings.local_stt_base_url || '').trim();
+            const model = (settings.local_stt_model || '').trim();
+            if (!baseUrl || !model) return { ok: false, provider, missing: 'local' };
+            return { ok: true, provider, missing: null };
+        }
         const nvidiaOk = isConfigured(settings.nvidia_api_key);
         const sonioxOk = isConfigured(settings.soniox_api_key);
         if (provider === 'soniox' && !sonioxOk) return { ok: false, provider, missing: 'soniox' };
@@ -281,13 +290,22 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
         // at the very last second.
         const sttCheck = await checkSttProviderConfigured();
         if (!sttCheck.ok) {
-            const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
-            showToast(
-                lang === 'vi'
-                    ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
-                    : `${providerName} API Key not configured. Open Settings to set it before uploading.`,
-                'error',
-            );
+            if (sttCheck.missing === 'local') {
+                showToast(
+                    lang === 'vi'
+                        ? 'Chưa cấu hình Local STT. Vào Cài đặt → STT → Local để nhập Base URL và Model trước khi upload.'
+                        : 'Local STT not configured. Open Settings → STT → Local to set Base URL and Model before uploading.',
+                    'error',
+                );
+            } else {
+                const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
+                showToast(
+                    lang === 'vi'
+                        ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
+                        : `${providerName} API Key not configured. Open Settings to set it before uploading.`,
+                    'error',
+                );
+            }
             useAppStore.getState().setSettingsOpen(true);
             return;
         }

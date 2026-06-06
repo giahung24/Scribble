@@ -84,13 +84,19 @@ def test_pytest_runs():
     assert True
 ```
 
-- [ ] **Step 4: Install deps and run**
+- [ ] **Step 4: Create a lightweight test venv and run**
 
-Run (from `src-python/`, in the project venv):
+The full `requirements.txt` pulls heavy native deps (onnxruntime, nvidia-riva-client) not needed for these unit tests. Create a dedicated test venv with only what the tests need (`httpx` is the only runtime dep our new code uses). The `.venv` is gitignored — do not commit it.
+
+Run (from repo root):
 ```bash
-cd src-python && pip install -r requirements.txt && python -m pytest tests/test_smoke.py -v
+python3 -m venv src-python/.venv
+src-python/.venv/bin/pip install -q pytest pytest-asyncio httpx
+src-python/.venv/bin/python -m pytest src-python/tests/test_smoke.py -v
 ```
 Expected: `1 passed`.
+
+> **For all later tasks:** run tests with `src-python/.venv/bin/python -m pytest src-python/tests/ -v` (the `conftest.py` puts `src-python/` on `sys.path`, so run pytest from the repo root or `src-python/` — both work). Ensure `src-python/.venv/` is covered by `.gitignore` (add the line if missing) but never commit the venv itself.
 
 - [ ] **Step 5: Commit**
 

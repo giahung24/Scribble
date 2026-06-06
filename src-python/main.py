@@ -765,6 +765,256 @@ async def soniox_stream_ws(websocket: WebSocket):
             pass
 
 
+# ─── Local (OpenAI-compatible Whisper) Pseudo-Realtime WebSocket ───
+@app.websocket("/ws/local-stream")
+async def local_stream_ws(websocket: WebSocket):
+    """Pseudo-realtime local STT: buffer live PCM, cut utterances on silence,
+    transcribe each via the batch /v1/audio/transcriptions endpoint, diarize
+    with CAM++, translate per chunk. Mirrors nvidia_stream_ws delivery shapes."""
+    await websocket.accept()
+
+    diarizer.reset()
+    source = websocket.query_params.get("source", "web")
+    diarizer.set_source(source)
+    max_sp = db.get_setting("max_speakers")
+    if max_sp:
+        try:
+            diarizer.set_max_speakers(int(max_sp))
+        except (ValueError, TypeError):
+            pass
+
+    meeting_id_raw = websocket.query_params.get("meeting_id")
+    archive_fh = None
+    if meeting_id_raw:
+        try:
+            meeting_id = int(meeting_id_raw)
+            meeting = db.get_meeting(meeting_id)
+            if meeting:
+                audio_dir = _voicescribe_data_dir() / "audio"
+                audio_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = audio_dir / f"meeting_{meeting_id}.pcm"
+                archive_fh = archive_path.open("ab")
+                db.update_meeting(meeting_id, audio_path=str(archive_path))
+        except Exception as e:
+            log.warning("[ws:local-stream] archive setup failed: %s", e)
+
+    stt_lang = db.get_setting("stt_language") or "vi"
+    translation_tasks = set()
+    # Defined in the OUTER scope so both _send_results and the receive loop's
+    # TRANSLATE command share it via closure.
+    translate_state = {"lang": websocket.query_params.get("translate_lang", "")}
+
+    def _close_archive():
+        nonlocal archive_fh
+        if archive_fh is not None:
+            try:
+                archive_fh.close()
+            except Exception:
+                pass
+            archive_fh = None
+
+    # Build the provider (validates Base URL + Model; raises if unset).
+    from stt_providers.registry import build_local_provider
+    try:
+        provider = build_local_provider(db)
+    except Exception as e:
+        _close_archive()
+        await websocket.send_json({
+            "error": True, "terminal": True, "text": str(e),
+            "is_final": True, "speaker": "System", "speaker_id": -1,
+        })
+        await websocket.close()
+        return
+
+    session = provider.open_session(stt_lang)
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, session.start)
+    except Exception as e:
+        _close_archive()
+        await websocket.send_json({
+            "error": True, "terminal": True, "text": str(e),
+            "is_final": True, "speaker": "System", "speaker_id": -1,
+        })
+        await websocket.close()
+        return
+
+    result_queue = asyncio.Queue()
+
+    def _read_results():
+        for result in session.results():
+            asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
+        asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
+
+    result_thread = threading.Thread(target=_read_results, daemon=True)
+    result_thread.start()
+
+    DIARIZE_MIN_BYTES = 16000  # 0.5s at 16kHz int16
+
+    async def _send_results():
+        from translate import translate_instant
+        current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+
+        transcript_parts: list[dict] = []
+        last_save_at = time.time()
+        SAVE_INTERVAL = 10.0
+
+        def _accumulate_part(text, speaker, speaker_id, chunk_id):
+            # Simpler than the Nvidia handler's _accumulate_part on purpose: the
+            # Nvidia path carries chunkData/chunkIds to REPLACE in-progress interim
+            # text in place. Local emits finals only (no interim text to replace),
+            # so a part needs just {text, speaker, speakerId, chunkId}. This is a
+            # subset of the Nvidia persisted shape and renders identically on
+            # reopen — TranscriptPart treats chunkIds as optional, and the
+            # translation matcher checks `chunkId === chunk_id` as well as chunkIds.
+            if not text.strip():
+                return
+            if transcript_parts and transcript_parts[-1].get("speakerId") == speaker_id:
+                p = transcript_parts[-1]
+                p["text"] = (p["text"] + " " + text).strip()
+            else:
+                transcript_parts.append({
+                    "text": text, "speaker": speaker,
+                    "speakerId": speaker_id, "chunkId": chunk_id,
+                })
+
+        def _flush_to_db():
+            nonlocal last_save_at
+            if not meeting_id_raw or not transcript_parts:
+                return
+            try:
+                db.update_meeting(int(meeting_id_raw),
+                                  transcript=json.dumps(transcript_parts, ensure_ascii=False))
+                last_save_at = time.time()
+            except Exception as e:
+                log.warning("[ws:local auto-save] error: %s", e)
+
+        last_speaker = "Speaker 1"
+        last_speaker_id = 0
+
+        while True:
+            result = await result_queue.get()
+            if result is None:
+                break
+            try:
+                # Interim activity tick — keep the UI's live area from looking frozen
+                if not result.get("is_final"):
+                    await websocket.send_json({
+                        "text": result.get("text", "…"), "is_final": False,
+                        "speaker": last_speaker, "speaker_id": last_speaker_id,
+                        "chunk_id": current_chunk_id,
+                    })
+                    continue
+
+                text = result.get("text", "")
+                if not text.strip():
+                    continue
+
+                msg = {
+                    "text": text, "is_final": True,
+                    "speaker": last_speaker, "speaker_id": last_speaker_id,
+                    "chunk_id": current_chunk_id,
+                }
+
+                # Diarize from the exact utterance PCM the session transcribed
+                pcm = result.get("pcm")
+                if pcm and len(pcm) >= DIARIZE_MIN_BYTES:
+                    try:
+                        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+                        speaker_info = await loop.run_in_executor(
+                            None, diarizer.identify_speaker_from_samples, samples, 16000
+                        )
+                        msg["speaker"] = speaker_info.get("speaker", last_speaker)
+                        msg["speaker_id"] = speaker_info.get("speaker_id", last_speaker_id)
+                        last_speaker = msg["speaker"]
+                        last_speaker_id = msg["speaker_id"]
+                    except Exception as e:
+                        log.warning("[ws:local] diarize error: %s", e)
+
+                await websocket.send_json(msg)
+                _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], current_chunk_id)
+
+                # Per-chunk translation (capture the chunk_id BEFORE advancing it)
+                if translate_state["lang"]:
+                    _text = msg["text"]
+                    _cid = msg["chunk_id"]
+                    _lang = translate_state["lang"]
+                    _src = stt_lang
+
+                    async def _do_translate(text=_text, cid=_cid, lang=_lang, src=_src):
+                        import re
+                        if not text or not lang:
+                            return
+                        if not re.sub(r'[^\w\s]', '', text).strip():
+                            return
+                        try:
+                            translated = await loop.run_in_executor(
+                                None, translate_instant, text, lang, db, src
+                            )
+                            if translated:
+                                await websocket.send_json({
+                                    "type": "translation",
+                                    "translation": translated,
+                                    "chunk_id": cid,
+                                    "append": True,
+                                })
+                        except Exception as e:
+                            log.warning("[ws:local-trans] error: %s", e)
+
+                    t = asyncio.create_task(_do_translate())
+                    translation_tasks.add(t)
+                    t.add_done_callback(translation_tasks.discard)
+
+                current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+
+                if time.time() - last_save_at >= SAVE_INTERVAL:
+                    _flush_to_db()
+            except WebSocketDisconnect:
+                break
+
+        _flush_to_db()
+
+    send_task = asyncio.create_task(_send_results())
+
+    try:
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            if "bytes" in data:
+                audio_bytes = data["bytes"]
+                session.feed_audio(audio_bytes)
+                if archive_fh is not None:
+                    try:
+                        archive_fh.write(audio_bytes)
+                    except Exception as e:
+                        log.warning("[ws:local-stream] archive write failed: %s", e)
+            elif "text" in data:
+                txt = data["text"]
+                if txt == "STOP":
+                    break
+                if txt.startswith("TRANSLATE:"):
+                    lang_cmd = txt[len("TRANSLATE:"):].strip()
+                    translate_state["lang"] = "" if lang_cmd.lower() == "off" else lang_cmd
+                    log.info("[ws:local] translation set mid-session: '%s'", translate_state["lang"])
+    except WebSocketDisconnect:
+        pass
+    finally:
+        session.stop()
+        result_thread.join(timeout=5)
+        try:
+            await asyncio.wait_for(send_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            send_task.cancel()
+        if translation_tasks:
+            await asyncio.wait(translation_tasks, timeout=5.0)
+        _close_archive()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     import traceback
 

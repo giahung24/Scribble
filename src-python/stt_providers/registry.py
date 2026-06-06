@@ -18,7 +18,7 @@ def build_local_provider(db) -> LocalOpenAIProvider:
         raise RuntimeError(
             "Local STT model chưa được cấu hình. Vào Settings → STT → Local."
         )
-    api_key = db.get_setting("local_stt_api_key") or ""
+    api_key = (db.get_setting("local_stt_api_key") or "").strip()
     return LocalOpenAIProvider(base_url, model, api_key)
 
 

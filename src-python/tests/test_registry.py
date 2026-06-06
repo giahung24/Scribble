@@ -41,3 +41,9 @@ def test_build_local_transcriber_returns_joined_text(monkeypatch):
     )
     transcribe = registry.build_local_transcriber(db)
     assert transcribe("/tmp/chunk.wav") == "xin chào"
+
+
+def test_build_local_provider_strips_trailing_slash():
+    db = FakeDB({"local_stt_base_url": "http://x:9000/", "local_stt_model": "whisper-1"})
+    p = registry.build_local_provider(db)
+    assert p.base_url == "http://x:9000"

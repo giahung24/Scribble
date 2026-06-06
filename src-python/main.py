@@ -849,7 +849,7 @@ async def local_stream_ws(websocket: WebSocket):
     result_thread = threading.Thread(target=_read_results, daemon=True)
     result_thread.start()
 
-    DIARIZE_MIN_BYTES = 16000  # 0.5s at 16kHz int16
+    DIARIZE_MIN_BYTES = 16000 * 2  # 0.5s at 16kHz int16 (2 bytes/sample)
 
     async def _send_results():
         from translate import translate_instant
@@ -897,7 +897,10 @@ async def local_stream_ws(websocket: WebSocket):
             if result is None:
                 break
             try:
-                # Interim activity tick — keep the UI's live area from looking frozen
+                # Interim activity tick — keeps the UI's live area from looking
+                # frozen while a chunk transcribes. It is NON-authoritative: if the
+                # session drops an utterance under backlog, a tick may have no
+                # following final, so the UI must only commit text from finals.
                 if not result.get("is_final"):
                     await websocket.send_json({
                         "text": result.get("text", "…"), "is_final": False,

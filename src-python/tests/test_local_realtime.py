@@ -69,3 +69,27 @@ def test_session_skips_empty_transcription():
     session.stop()
     finals = [r for r in session.results() if r["is_final"]]
     assert finals == []  # no final emitted for empty text
+
+
+def test_provider_exception_does_not_hang():
+    """A failing transcription must not hang results() — the worker catches it,
+    continues, and still emits the terminating sentinel/None."""
+    class _BoomProvider:
+        def transcribe_file(self, wav_path, language, **opts):
+            raise RuntimeError("server exploded")
+    session = LocalRealtimeSession(_BoomProvider(), language="en", sample_rate=SR)
+    session.start()
+    session.feed_audio(_speech(1500) + _silence(700))
+    session.stop()
+    finals = [r for r in session.results() if r["is_final"]]
+    assert finals == []  # failed chunk → no final, and we did not hang
+
+
+def test_feed_after_stop_is_ignored():
+    provider = _FakeProvider()
+    session = LocalRealtimeSession(provider, language="en", sample_rate=SR)
+    session.start()
+    session.stop()
+    session.feed_audio(_speech(1500) + _silence(700))  # must be a no-op
+    list(session.results())  # drains and terminates
+    assert provider.calls == []

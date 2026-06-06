@@ -43,35 +43,46 @@ class LocalRealtimeSession:
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> None:
+        if self._worker is not None and self._worker.is_alive():
+            return  # already started — don't spawn a second worker
         self._stopped = False
         self._worker = threading.Thread(target=self._transcribe_loop, daemon=True)
         self._worker.start()
 
     def stop(self) -> None:
-        # Stop accepting audio, flush any pending tail, then signal end-of-work.
+        """Stop accepting audio, flush any pending tail, and guarantee results()
+        terminates. MUST be called on disconnect/stop (the WebSocket handler does
+        this in a finally block). Call from the same thread as feed_audio().
+        """
+        if self._worker is None:
+            return  # never started — nothing to tear down
         self._stopped = True
         tail = self._endpointer.flush()
         if tail:
             self._enqueue(tail)
+        # Single-producer invariant: feed_audio() and stop() run on the same
+        # thread and the worker only CONSUMES _chunk_q, so nothing refills it
+        # while we enqueue the sentinel — a blocking put always lands (the worker
+        # is actively draining). The timeout + direct None is a belt-and-suspenders
+        # guarantee that results() can never hang even if that invariant is broken.
         try:
-            self._chunk_q.put_nowait(_SENTINEL)
+            self._chunk_q.put(_SENTINEL, timeout=5.0)
         except queue.Full:
-            # queue saturated — drain one and retry so the sentinel always lands
-            try:
-                self._chunk_q.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._chunk_q.put_nowait(_SENTINEL)
-            except queue.Full:
-                pass
+            log.warning("[local-rt] stop sentinel could not be enqueued; "
+                        "ending results() directly")
+            self._out_q.put(None)
 
     # ── feed ───────────────────────────────────────────────────────────────
     def feed_audio(self, pcm_bytes: bytes) -> None:
+        # Must be called on the same thread as stop() (single producer for
+        # _chunk_q). Safe no-op after stop().
         if self._stopped:
             return
         for utt in self._endpointer.feed(pcm_bytes):
-            # emit the activity tick immediately, then queue for transcription
+            # Emit the activity tick immediately, then queue for transcription.
+            # If _enqueue drops the utterance (backlog full), this tick is
+            # orphaned — so the UI must treat an interim "…" as non-authoritative
+            # and only commit text from finals.
             self._out_q.put(dict(_INTERIM_TICK))
             self._enqueue(utt)
 
@@ -119,9 +130,16 @@ class LocalRealtimeSession:
     def _write_wav(self, pcm: bytes) -> str:
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="local-rt-")
         os.close(fd)
-        with wave.open(path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self._sr)
-            wf.writeframes(pcm)
+        try:
+            with wave.open(path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self._sr)
+                wf.writeframes(pcm)
+        except Exception:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise
         return path

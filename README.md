@@ -369,6 +369,13 @@ npx tauri build
 
 > **Local STT (v1):** point Settings → STT → Local at your OpenAI-compatible transcription server's Base URL. Recommended model: Whisper `large-v3` for Vietnamese. Realtime recording and cabin translation with the local provider are planned for a later version.
 
+> **Realtime (v2):** The local provider now supports live recording in addition
+> to upload. It is pseudo-realtime — audio is cut into utterances on speech
+> pauses and transcribed through the same `/v1/audio/transcriptions` endpoint, so
+> segments appear after each utterance (2–6 s typical) rather than word-by-word.
+> Use a GPU or a smaller/distilled model for the lowest latency. Live translation
+> is supported via the existing translation setting.
+
 > 🔒 **Privacy:** Your API keys are stored **entirely on your local machine**. We never collect, transmit, or use your API keys for any purpose.
 
 ## 🤖 LLM Configuration

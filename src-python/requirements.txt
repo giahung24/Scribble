@@ -18,3 +18,9 @@ onnxruntime>=1.17.0
 # instead (see _ffprobe_duration in upload_pipeline.py).
 imageio-ffmpeg>=0.5.1
 pyinstaller>=6.0
+# On-device STT (faster-whisper realtime + batch) and translation (NLLB via CTranslate2)
+faster-whisper>=1.0.0
+ctranslate2>=4.0.0
+transformers>=4.40.0
+huggingface_hub>=0.23.0
+sentencepiece>=0.2.0

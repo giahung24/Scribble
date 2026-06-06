@@ -24,6 +24,8 @@ def _parse_transcription_response(payload: dict) -> list[STTSegment]:
     if isinstance(segments, list) and segments:
         out: list[STTSegment] = []
         for s in segments:
+            if not isinstance(s, dict):
+                continue
             text = (s.get("text") or "").strip()
             if not text:
                 continue
@@ -31,8 +33,8 @@ def _parse_transcription_response(payload: dict) -> list[STTSegment]:
             end = s.get("end")
             out.append(STTSegment(
                 text=text,
-                start_ms=int(start * 1000) if start is not None else None,
-                end_ms=int(end * 1000) if end is not None else None,
+                start_ms=int(start * 1000) if isinstance(start, (int, float)) else None,
+                end_ms=int(end * 1000) if isinstance(end, (int, float)) else None,
                 language=language,
             ))
         if out:

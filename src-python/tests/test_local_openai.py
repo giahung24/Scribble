@@ -22,7 +22,6 @@ def test_segments_to_text_empty():
 
 
 import httpx
-import pytest
 from stt_providers.local_openai import LocalOpenAIProvider, _parse_transcription_response
 
 
@@ -98,3 +97,28 @@ def test_transcribe_file_no_api_key_omits_auth(tmp_path, monkeypatch):
     provider = LocalOpenAIProvider("http://localhost:9000", "whisper-1")
     provider.transcribe_file(wav, "vi")
     assert "Authorization" not in captured["headers"]
+
+
+def test_parse_malformed_segments_do_not_raise():
+    # Non-dict items and non-numeric timestamps must be tolerated, not crash.
+    payload = {
+        "segments": [
+            "not a dict",
+            {"start": "0.0", "end": None, "text": "kept"},
+        ],
+    }
+    segs = _parse_transcription_response(payload)
+    assert [s.text for s in segs] == ["kept"]
+    assert segs[0].start_ms is None and segs[0].end_ms is None
+
+
+def test_parse_all_blank_segments_falls_back_to_text():
+    payload = {"segments": [{"start": 0, "end": 1, "text": "   "}], "text": "fallback"}
+    segs = _parse_transcription_response(payload)
+    assert [s.text for s in segs] == ["fallback"]
+
+
+def test_parse_segment_without_timestamps():
+    segs = _parse_transcription_response({"segments": [{"text": "hi"}]})
+    assert len(segs) == 1
+    assert segs[0].start_ms is None and segs[0].end_ms is None

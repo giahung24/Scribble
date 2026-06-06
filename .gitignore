@@ -66,3 +66,7 @@ Thumbs.db
 *.sw?
 .vercel
 releases/
+
+claude_onboard.md
+gitnexus.md
+.claude/skills/gitnexus/

@@ -348,3 +348,16 @@ export const fetchLLMModels = (
     return request<{ models: string[]; error?: string }>(`/models?${params}`);
 };
 
+// ─── On-device Models ───
+export interface OndeviceModelStatus {
+    whisper: { small: boolean; medium: boolean; 'large-v3': boolean };
+    nllb: boolean;
+}
+export const getOndeviceModels = () => request<OndeviceModelStatus>('/ondevice/models');
+export const downloadOndeviceModel = (kind: 'whisper' | 'nllb', size?: string) =>
+    request<{ ok: boolean; error?: string }>('/ondevice/models/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, size }),
+    });
+

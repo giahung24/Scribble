@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { resetDiarize, createDraft, downloadTextFile, getSettings } from '../lib/api';
+import { resetDiarize, createDraft, downloadTextFile, getSettings, getOndeviceModels } from '../lib/api';
 import { fetchSidecar, waitForSidecarReady } from '../lib/sidecar';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -364,6 +364,25 @@ export function RecordingBar() {
                     );
                     useAppStore.getState().setSettingsOpen(true);
                     return;
+                }
+                if (provider === 'ondevice') {
+                    try {
+                        const r = await getOndeviceModels();
+                        const size = (settings.ondevice_model_size as string) || 'small';
+                        const ok = r && r.whisper && (r.whisper as any)[size];
+                        if (!ok) {
+                            showToast(
+                                lang === 'vi'
+                                    ? 'Model on-device chưa tải. Vào Cài đặt → On-device để tải trước khi ghi âm.'
+                                    : 'On-device model not downloaded. Open Settings → On-device to download first.',
+                                'error'
+                            );
+                            useAppStore.getState().setSettingsOpen(true);
+                            return;
+                        }
+                    } catch {
+                        // status endpoint unreachable — let it proceed; engine will emit a terminal error if truly missing
+                    }
                 }
             } catch (e) {
                 // Backend not ready — overlay should be showing, but guard anyway

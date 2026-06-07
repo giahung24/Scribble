@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { getSettings, detectOfflineAfterFailure, looksLikeNetworkError } from '../lib/api';
+import { getSettings, getOndeviceModels, detectOfflineAfterFailure, looksLikeNetworkError } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import {
     cancelAudioUpload,
@@ -47,11 +47,22 @@ import { useToast } from './Toast';
 async function checkSttProviderConfigured(): Promise<{
     ok: boolean;
     provider: string;
-    missing: 'nvidia' | 'soniox' | null;
+    missing: 'nvidia' | 'soniox' | 'ondevice-model' | null;
 }> {
     try {
         const settings = await getSettings();
         const provider = (settings.stt_provider || 'nvidia').toLowerCase();
+        if (provider === 'ondevice') {
+            try {
+                const r = await getOndeviceModels();
+                if (!(r && r.whisper && r.whisper['large-v3'])) {
+                    return { ok: false, provider, missing: 'ondevice-model' };
+                }
+                return { ok: true, provider, missing: null };
+            } catch {
+                return { ok: true, provider, missing: null }; // don't false-block
+            }
+        }
         const isConfigured = (raw: string | undefined) => {
             const v = (raw || '').trim();
             if (!v) return false;
@@ -281,13 +292,22 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
         // at the very last second.
         const sttCheck = await checkSttProviderConfigured();
         if (!sttCheck.ok) {
-            const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
-            showToast(
-                lang === 'vi'
-                    ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
-                    : `${providerName} API Key not configured. Open Settings to set it before uploading.`,
-                'error',
-            );
+            if (sttCheck.missing === 'ondevice-model') {
+                showToast(
+                    lang === 'vi'
+                        ? 'Model on-device large-v3 chưa tải. Vào Cài đặt → On-device để tải trước khi upload.'
+                        : 'On-device large-v3 model not downloaded. Open Settings → On-device to download it before uploading.',
+                    'error',
+                );
+            } else {
+                const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
+                showToast(
+                    lang === 'vi'
+                        ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
+                        : `${providerName} API Key not configured. Open Settings to set it before uploading.`,
+                    'error',
+                );
+            }
             useAppStore.getState().setSettingsOpen(true);
             return;
         }

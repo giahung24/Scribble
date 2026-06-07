@@ -50,7 +50,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -282,6 +282,44 @@ async def logs_stream():
                     _log_subscribers.remove(q)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+# ─── On-device model status / download ───
+@app.get("/ondevice/models")
+async def ondevice_models_status():
+    """Which on-device models are present in the local cache."""
+    from stt_providers.ondevice.models import ModelManager
+    mm = ModelManager()
+    return {
+        "whisper": {
+            "small": mm.is_whisper_present("small"),
+            "medium": mm.is_whisper_present("medium"),
+            "large-v3": mm.is_whisper_present("large-v3"),
+        },
+        "nllb": mm.is_nllb_present(),
+    }
+
+
+@app.post("/ondevice/models/download")
+async def ondevice_models_download(payload: dict = Body(...)):
+    """Download a model on demand (blocking call offloaded to a thread).
+    Body: {"kind": "whisper"|"nllb", "size"?: "small"|"medium"|"large-v3"}.
+    The UI polls GET /ondevice/models afterward to refresh status."""
+    from stt_providers.ondevice.models import ModelManager
+    kind = (payload.get("kind") or "").strip().lower()
+    mm = ModelManager()
+    try:
+        if kind == "nllb":
+            await asyncio.to_thread(mm.ensure_nllb)
+        elif kind == "whisper":
+            size = (payload.get("size") or "small").strip()
+            await asyncio.to_thread(mm.ensure_whisper, size)
+        else:
+            return {"ok": False, "error": "unknown kind"}
+        return {"ok": True}
+    except Exception as e:
+        log.warning("[ondevice] model download failed: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 # ─── Nvidia Streaming WebSocket ───

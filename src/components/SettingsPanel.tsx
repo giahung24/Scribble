@@ -6,6 +6,7 @@ import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api'
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
+import OnDeviceModelManager from './OnDeviceModelManager';
 import { useToast } from './Toast';
 
 export function SettingsPanel() {
@@ -500,7 +501,7 @@ export function SettingsPanel() {
                                         ? 'large-v3 cần GPU để chạy thời gian thực; dùng CPU thì chọn small. Chế độ Tải lên (batch) luôn dùng large-v3 bất kể lựa chọn này.'
                                         : 'large-v3 needs a GPU for realtime; on CPU use small. Upload (batch) mode always uses large-v3 regardless of this setting.'}
                                 </div>
-                                {/* OnDeviceModelManager slot — Task 12 */}
+                                <OnDeviceModelManager lang={lang} modelSize={ondeviceModelSize} translateEnabled={false} />
                             </div>
                         )}
 

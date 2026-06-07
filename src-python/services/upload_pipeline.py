@@ -473,6 +473,10 @@ async def _execute(
                     f"Tất cả {failed_count} phần Soniox đều thất bại — "
                     "vui lòng kiểm tra Soniox API key, mạng, hoặc upload lại file."
                 )
+    elif stt_provider == "ondevice":
+        transcript_parts = await _run_ondevice_pipeline(
+            job, meeting, meeting_id, wav_path, tmp_root,
+        )
     else:
         transcript_parts = await _run_nvidia_chunked_pipeline(
             job, meeting, meeting_id, wav_path, tmp_root,
@@ -1321,6 +1325,101 @@ async def _run_nvidia_chunked_pipeline(
         (r["idx"], r["embedding"]) for r in chunk_results if r["embedding"] is not None
     ]
     speaker_map = await asyncio.to_thread(cluster_speakers, embeddings)
+    if _is_cancelled(job):
+        return []
+
+    return _build_transcript_parts(chunk_results, speaker_map)
+
+
+async def _run_ondevice_pipeline(
+    job: JobState, meeting: dict, meeting_id: int, wav_path: Path, tmp_root: Path,
+) -> list[dict]:
+    """On-device batch: whole-file faster-whisper (large-v3) + CAM++ diarization.
+
+    No server; best quality (latency irrelevant for a file). Reuses the same
+    embedding/clustering/parts assembly as the nvidia path: we slice each
+    whisper segment to a temp WAV, run CAM++ on it, cluster the embeddings,
+    then hand everything to _build_transcript_parts.
+    """
+    from stt_providers.ondevice.runtime import pick_device
+    from stt_providers.ondevice.models import ModelManager
+    from stt_providers.ondevice.batch import transcribe_file_ondevice
+    from services.vad_splitter import _extract_chunk_with_ffmpeg
+
+    job_id = job.job_id
+    device, compute = pick_device()
+    mm = ModelManager()
+    if not mm.is_whisper_present("large-v3"):
+        raise RuntimeError(
+            "On-device model 'large-v3' chưa tải. "
+            "Vào Settings → On-device để tải."
+        )
+    stt_lang = (db.get_setting("stt_language") or "vi")
+
+    # ── Whole-file transcription (faster-whisper, built-in VAD) ───────────
+    await registry.update(
+        job_id,
+        status=JobStatus.TRANSCRIBING,
+        progress=P_TRANSCRIBE_START,
+        message="Nhận dạng (on-device)",
+    )
+    segs = await asyncio.to_thread(
+        transcribe_file_ondevice,
+        str(wav_path), stt_lang, str(mm.whisper_dir("large-v3")), device, compute,
+    )
+    if _is_cancelled(job):
+        return []
+    if not segs:
+        raise ValueError("Không phát hiện được giọng nói trong file")
+
+    # ── Diarization: per-segment CAM++ embedding → global clustering ──────
+    diarizer = None
+    try:
+        from main import diarizer as _diarizer
+        diarizer = _diarizer
+    except Exception:
+        log.warning("[pipeline] global diarizer not available — single-speaker output")
+
+    await registry.update(
+        job_id,
+        status=JobStatus.FINALIZING,
+        progress=P_FINALIZE,
+        message="Phân loại người nói",
+    )
+    seg_dir = tmp_root / "ondevice_segs"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    chunk_results: list[dict] = []
+    for i, s in enumerate(segs):
+        start_ms = int(s.get("start_ms") or 0)
+        end_ms = int(s.get("end_ms") or 0)
+        embedding = None
+        if diarizer is not None and end_ms > start_ms:
+            seg_wav = seg_dir / f"seg_{i:05d}.wav"
+            try:
+                await asyncio.to_thread(
+                    _extract_chunk_with_ffmpeg, wav_path, seg_wav, start_ms, end_ms - start_ms
+                )
+                emb = await asyncio.to_thread(extract_embedding, diarizer, seg_wav)
+                if not isinstance(emb, Exception):
+                    embedding = emb
+            except Exception as exc:
+                log.warning("[pipeline] ondevice embed failed seg %d: %s", i, exc)
+        chunk_results.append({
+            "idx": i,
+            "text": s.get("text") or "",
+            "embedding": embedding,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+        })
+        if _is_cancelled(job):
+            return []
+
+    embeddings = [
+        (r["idx"], r["embedding"]) for r in chunk_results if r["embedding"] is not None
+    ]
+    speaker_map = (
+        await asyncio.to_thread(cluster_speakers, embeddings) if embeddings else {}
+    )
     if _is_cancelled(job):
         return []
 

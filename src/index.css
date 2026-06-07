@@ -2851,6 +2851,79 @@ body.electron-app .sub-tabs {
   color: var(--text-muted);
 }
 
+/* ── 3-up provider cards (Nvidia / Soniox / On-device) ──
+   Spec-sheet layout: tagline + a row of attribute chips so the
+   cost/latency/privacy tradeoffs read side-by-side at a glance. */
+.setting-provider-tabs.provider-tabs--3up {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.provider-card {
+  justify-content: flex-start;
+  align-items: stretch;
+  text-align: left;
+  gap: 6px;
+  padding: 10px 11px;
+}
+
+.provider-card strong {
+  font-size: 0.82rem;
+}
+
+.provider-card .provider-tab-desc {
+  line-height: 1.3;
+  min-height: 1.9em;
+}
+
+.provider-card-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.provider-attr {
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius-full);
+  background: var(--gray-100);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Differentiating chips get a tinted accent so the key tradeoff
+   (free vs paid, cloud vs local) pops without color-coding the
+   whole card. */
+.provider-attr--free {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.provider-attr--paid {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.provider-attr--cloud {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--indigo-600);
+}
+
+.provider-attr--local {
+  background: rgba(13, 148, 136, 0.14);
+  color: #0f766e;
+}
+
+@media (max-width: 520px) {
+  .setting-provider-tabs.provider-tabs--3up {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Soniox Language Chips ── */
 .soniox-lang-grid {
   display: flex;
@@ -3040,6 +3113,18 @@ body.electron-app .sub-tabs {
   flex-shrink: 0;
   color: #d97706;
   margin-top: 1px;
+}
+
+/* Info variant — neutral teal, not an alarming amber. Used for the
+   on-device privacy note (it's reassurance, not a caution). */
+.setting-warning--info {
+  background: rgba(13, 148, 136, 0.07);
+  border-color: rgba(13, 148, 136, 0.2);
+  color: #0f766e;
+}
+
+.setting-warning--info svg {
+  color: #0d9488;
 }
 
 /* Config status badge — inline label */

@@ -11,11 +11,12 @@ import { useToast } from './Toast';
 export function SettingsPanel() {
     const { setSettingsOpen, lang } = useAppStore();
     const { showToast } = useToast();
-    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox'>('nvidia');
+    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'ondevice'>('nvidia');
     const [nvidiaKey, setNvidiaKey] = useState('');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
     const [nvidiaLang, setNvidiaLang] = useState('vi');
+    const [ondeviceModelSize, setOndeviceModelSize] = useState<'small' | 'medium' | 'large-v3'>('small');
     const [llmKey, setLlmKey] = useState('');
     const [llmUrl, setLlmUrl] = useState('');
     const [llmModel, setLlmModel] = useState('');
@@ -91,7 +92,8 @@ export function SettingsPanel() {
     const loadSettings = async () => {
         try {
             const s = await getSettings();
-            setSttProvider((s.stt_provider as 'nvidia' | 'soniox') || 'nvidia');
+            setSttProvider((s.stt_provider as 'nvidia' | 'soniox' | 'ondevice') || 'nvidia');
+            setOndeviceModelSize((s.ondevice_model_size as any) || 'small');
             if (s.nvidia_api_key) setNvidiaKey('••••••••');
             if (s.soniox_api_key) setSonioxKey('••••••••');
             if (s.soniox_language_hints) {
@@ -126,6 +128,7 @@ export function SettingsPanel() {
         body.stt_language = nvidiaLang;
         body.soniox_language_hints = Array.from(sonioxLangs).join(',');
         body.max_speakers = maxSpeakers;
+        body.ondevice_model_size = ondeviceModelSize;
         if (!llmKey.includes('•')) body.llm_api_key = llmKey;
         if (llmProvider === 'compatible') {
             body.llm_base_url = llmUrl;
@@ -241,7 +244,7 @@ export function SettingsPanel() {
         { value: 'sw', label: 'Swahili' },
     ];
 
-    const langOptions = sttProvider === 'nvidia' ? nvidiaLanguages : sonioxLanguages;
+    const langOptions = sttProvider === 'soniox' ? sonioxLanguages : nvidiaLanguages;
 
     const currentApiKey = sttProvider === 'nvidia' ? nvidiaKey : sonioxKey;
     const setCurrentApiKey = sttProvider === 'nvidia' ? setNvidiaKey : setSonioxKey;
@@ -331,23 +334,58 @@ export function SettingsPanel() {
                             <div className="settings-section-desc">{t('voice_recognition_desc', lang)}</div>
                         </div>
 
-                        {/* Provider Selector — span full row, the tab pair is wide. */}
+                        {/* Provider Selector — three spec-sheet cards so the
+                            cost / latency / privacy tradeoffs read at a glance.
+                            Each card carries a tagline plus three attribute chips
+                            (Cost · Mode · Privacy); the differentiating chip is
+                            accented per-provider. */}
                         <div className="setting-group setting-group--full">
                             <div className="setting-label">{t('stt_provider', lang)}</div>
-                            <div className="setting-provider-tabs">
+                            <div className="setting-provider-tabs provider-tabs--3up">
                                 <button
-                                    className={`provider-tab${sttProvider === 'nvidia' ? ' active' : ''}`}
+                                    className={`provider-tab provider-card${sttProvider === 'nvidia' ? ' active' : ''}`}
                                     onClick={() => setSttProvider('nvidia')}
+                                    aria-pressed={sttProvider === 'nvidia'}
                                 >
                                     <strong>Nvidia Riva</strong>
-                                    <span className="provider-tab-desc">{t('nvidia_desc', lang)}</span>
+                                    <span className="provider-tab-desc">
+                                        {lang === 'vi' ? 'Đám mây, độ trễ thấp' : 'Low-latency cloud'}
+                                    </span>
+                                    <span className="provider-card-attrs">
+                                        <span className="provider-attr provider-attr--free">{lang === 'vi' ? 'Miễn phí' : 'Free'}</span>
+                                        <span className="provider-attr">{lang === 'vi' ? 'Thời gian thực' : 'Realtime'}</span>
+                                        <span className="provider-attr provider-attr--cloud">{lang === 'vi' ? 'Đám mây' : 'Cloud'}</span>
+                                    </span>
                                 </button>
                                 <button
-                                    className={`provider-tab${sttProvider === 'soniox' ? ' active' : ''}`}
+                                    className={`provider-tab provider-card${sttProvider === 'soniox' ? ' active' : ''}`}
                                     onClick={() => setSttProvider('soniox')}
+                                    aria-pressed={sttProvider === 'soniox'}
                                 >
                                     <strong>Soniox</strong>
-                                    <span className="provider-tab-desc">{t('soniox_desc', lang)}</span>
+                                    <span className="provider-tab-desc">
+                                        {lang === 'vi' ? 'Độ chính xác cao cấp' : 'Premium accuracy'}
+                                    </span>
+                                    <span className="provider-card-attrs">
+                                        <span className="provider-attr provider-attr--paid">{lang === 'vi' ? 'Trả phí' : 'Paid'}</span>
+                                        <span className="provider-attr">{lang === 'vi' ? 'TG thực + dịch' : 'Realtime + translate'}</span>
+                                        <span className="provider-attr provider-attr--cloud">{lang === 'vi' ? 'Đám mây' : 'Cloud'}</span>
+                                    </span>
+                                </button>
+                                <button
+                                    className={`provider-tab provider-card${sttProvider === 'ondevice' ? ' active' : ''}`}
+                                    onClick={() => setSttProvider('ondevice')}
+                                    aria-pressed={sttProvider === 'ondevice'}
+                                >
+                                    <strong>{lang === 'vi' ? 'Trên thiết bị' : 'On-device'}</strong>
+                                    <span className="provider-tab-desc">
+                                        {lang === 'vi' ? 'Chạy cục bộ, không cần máy chủ' : 'Runs locally, no server'}
+                                    </span>
+                                    <span className="provider-card-attrs">
+                                        <span className="provider-attr provider-attr--free">{lang === 'vi' ? 'Miễn phí' : 'Free'}</span>
+                                        <span className="provider-attr">{lang === 'vi' ? 'TG thực + Tải lên' : 'Realtime + Upload'}</span>
+                                        <span className="provider-attr provider-attr--local">{lang === 'vi' ? '100% cục bộ' : '100% local'}</span>
+                                    </span>
                                 </button>
                             </div>
                             {sttProvider === 'soniox' && (
@@ -361,10 +399,22 @@ export function SettingsPanel() {
                                     }</span>
                                 </div>
                             )}
+                            {sttProvider === 'ondevice' && (
+                                <div className="setting-warning setting-warning--info">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
+                                    </svg>
+                                    <span>{lang === 'vi'
+                                        ? 'Âm thanh không bao giờ rời khỏi máy của bạn — không cần API key. Thời gian thực (≈1–2s) hoặc Tải lên (chất lượng tốt nhất). Cần tải mô hình một lần.'
+                                        : 'Audio never leaves your machine — no API key needed. Realtime (≈1–2s) or Upload (best quality). Requires a one-time model download.'
+                                    }</span>
+                                </div>
+                            )}
                         </div>
 
-                        {/* API Key — span full so the long input row breathes */}
-                        <div className="setting-group setting-group--full">
+                        {/* API Key — span full so the long input row breathes.
+                            Cloud-only: on-device needs no credential. */}
+                        {(sttProvider === 'nvidia' || sttProvider === 'soniox') && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasApiKey} />
@@ -391,14 +441,14 @@ export function SettingsPanel() {
                                 </button>
                             </div>
                             <div className="setting-hint">{t('signup_free_at', lang)} <a href={signupHref} target="_blank" rel="noreferrer">{signupUrl}</a></div>
-                        </div>
+                        </div>}
 
                         {/* Language Selection — dropdown */}
                         <div className="setting-group">
                             <div className="setting-label">
                                 {t(sttProvider === 'soniox' ? 'soniox_languages' : 'primary_language', lang)}
                             </div>
-                            {sttProvider === 'nvidia' ? (
+                            {(sttProvider === 'nvidia' || sttProvider === 'ondevice') ? (
                                 <CustomSelect
                                     className="setting-lang-select"
                                     options={langOptions}
@@ -424,14 +474,38 @@ export function SettingsPanel() {
                                 />
                             )}
                             <div className="setting-hint">
-                                {sttProvider === 'nvidia'
-                                    ? t('language_hint', lang)
-                                    : t('soniox_languages_hint', lang)}
+                                {sttProvider === 'soniox'
+                                    ? t('soniox_languages_hint', lang)
+                                    : t('language_hint', lang)}
                             </div>
                         </div>
 
-                        {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
-                        {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
+                        {/* On-device only — realtime model size + model manager slot */}
+                        {sttProvider === 'ondevice' && (
+                            <div className="setting-group setting-group--full">
+                                <div className="setting-label">
+                                    {lang === 'vi' ? 'Kích thước mô hình (thời gian thực)' : 'Realtime model size'}
+                                </div>
+                                <CustomSelect
+                                    options={[
+                                        { value: 'small',    label: lang === 'vi' ? 'Small — nhanh, hợp CPU' : 'Small — fast, CPU-friendly' },
+                                        { value: 'medium',   label: lang === 'vi' ? 'Medium — cân bằng' : 'Medium — balanced' },
+                                        { value: 'large-v3', label: lang === 'vi' ? 'Large-v3 — chính xác nhất, cần GPU' : 'Large-v3 — most accurate, needs GPU' },
+                                    ]}
+                                    value={ondeviceModelSize}
+                                    onChange={(v) => setOndeviceModelSize(v as 'small' | 'medium' | 'large-v3')}
+                                />
+                                <div className="setting-hint">
+                                    {lang === 'vi'
+                                        ? 'large-v3 cần GPU để chạy thời gian thực; dùng CPU thì chọn small. Chế độ Tải lên (batch) luôn dùng large-v3 bất kể lựa chọn này.'
+                                        : 'large-v3 needs a GPU for realtime; on CPU use small. Upload (batch) mode always uses large-v3 regardless of this setting.'}
+                                </div>
+                                {/* OnDeviceModelManager slot — Task 12 */}
+                            </div>
+                        )}
+
+                        {/* Max Speakers — Nvidia + On-device run diarization (Soniox is built-in) */}
+                        {(sttProvider === 'nvidia' || sttProvider === 'ondevice') && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
                             </div>

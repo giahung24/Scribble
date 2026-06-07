@@ -568,6 +568,233 @@ async def nvidia_stream_ws(websocket: WebSocket):
             pass
 
 
+# ─── On-device (faster-whisper) Streaming WebSocket ───
+@app.websocket("/ws/ondevice-stream")
+async def ondevice_stream_ws(websocket: WebSocket):
+    """On-device realtime STT (+ translation) via faster-whisper streaming.
+    Mirrors nvidia_stream_ws delivery shapes; ASR + MT run fully locally."""
+    await websocket.accept()
+    diarizer.reset()
+    diarizer.set_source(websocket.query_params.get("source", "web"))
+    _max = db.get_setting("max_speakers")
+    if _max:
+        try:
+            diarizer.set_max_speakers(int(_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Optional .pcm archive (set up before engine build so error-return can close it)
+    meeting_id_raw = websocket.query_params.get("meeting_id")
+    archive_fh = None
+    if meeting_id_raw:
+        try:
+            meeting_id = int(meeting_id_raw)
+            meeting = db.get_meeting(meeting_id)
+            if meeting:
+                audio_dir = _voicescribe_data_dir() / "audio"
+                audio_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = audio_dir / f"meeting_{meeting_id}.pcm"
+                archive_fh = archive_path.open("ab")
+                db.update_meeting(meeting_id, audio_path=str(archive_path))
+        except Exception as e:
+            log.warning("[ws:ondevice-stream] archive setup failed: %s", e)
+
+    def _close_archive():
+        nonlocal archive_fh
+        if archive_fh is not None:
+            try:
+                archive_fh.close()
+            except Exception:
+                pass
+            archive_fh = None
+
+    stt_lang = db.get_setting("stt_language") or "vi"
+    translate_state = {"lang": websocket.query_params.get("translate_lang", "")}
+
+    try:
+        from stt_providers.ondevice.runtime import pick_device, realtime_model_size
+        from stt_providers.ondevice.models import ModelManager
+        from stt_providers.ondevice.streaming_asr import WhisperStreamingASR
+        from stt_providers.ondevice.translator import NllbTranslator
+        from stt_providers.ondevice.lang import to_nllb_code
+        from stt_providers.ondevice.session import OnDeviceStreamingSession
+
+        device, compute = pick_device()
+        size = realtime_model_size(device, override=db.get_setting("ondevice_model_size") or None)
+        mm = ModelManager()
+        if not mm.is_whisper_present(size):
+            raise RuntimeError(f"On-device model '{size}' chưa tải. Vào Settings → On-device để tải.")
+        asr = WhisperStreamingASR.load(mm.whisper_dir(size), language=stt_lang,
+                                       device=device, compute_type=compute)
+        translate_fn = None
+        if translate_state["lang"]:
+            if not mm.is_nllb_present():
+                raise RuntimeError("Model dịch (NLLB) chưa tải. Vào Settings → On-device để tải.")
+            nllb = NllbTranslator.load(mm.nllb_dir(), device=device, compute_type=compute)
+            src, tgt = to_nllb_code(stt_lang), to_nllb_code(translate_state["lang"])
+            translate_fn = lambda t, _s=src, _t=tgt: nllb.translate(t, _s, _t)
+        session = OnDeviceStreamingSession(asr=asr, translate=translate_fn)
+        session.start()
+    except Exception as e:
+        _close_archive()
+        await websocket.send_json({"error": True, "terminal": True, "text": str(e),
+                                   "is_final": True, "speaker": "System", "speaker_id": -1})
+        await websocket.close()
+        return
+
+    loop = asyncio.get_running_loop()
+    result_queue = asyncio.Queue()
+    DIARIZE_MIN_BYTES = 16000 * 2  # 0.5s at 16kHz 16-bit mono
+
+    def _read_results():
+        for result in session.results():
+            asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
+        asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
+
+    result_thread = threading.Thread(target=_read_results, daemon=True)
+    result_thread.start()
+
+    async def _send_results():
+        current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+        last_speaker = "Speaker 1"
+        last_speaker_id = 0
+
+        transcript_parts: list[dict] = []
+        last_save_at = time.time()
+        SAVE_INTERVAL = 10.0
+
+        def _accumulate_part(text: str, speaker: str, speaker_id: int, chunk_id: str):
+            if not text.strip():
+                return
+            if transcript_parts and transcript_parts[-1].get("speakerId") == speaker_id:
+                p = transcript_parts[-1]
+                ids = p.get("chunkIds") or []
+                if chunk_id and chunk_id not in ids:
+                    ids.append(chunk_id)
+                p["chunkIds"] = ids
+                if "chunkData" not in p:
+                    p["chunkData"] = {p.get("chunkId"): p.get("text", "")}
+                p["chunkData"][chunk_id] = text
+                ordered = [p["chunkData"][cid] for cid in p.get("chunkIds", []) if p.get("chunkData", {}).get(cid)]
+                p["text"] = " ".join(ordered)
+            else:
+                transcript_parts.append({
+                    "text": text, "speaker": speaker, "speakerId": speaker_id,
+                    "chunkId": chunk_id, "chunkIds": [chunk_id] if chunk_id else [],
+                    "chunkData": {chunk_id: text} if chunk_id else {},
+                })
+
+        def _flush_to_db():
+            nonlocal last_save_at
+            if not meeting_id_raw or not transcript_parts:
+                return
+            try:
+                mid = int(meeting_id_raw)
+                db.update_meeting(mid, transcript=json.dumps(transcript_parts, ensure_ascii=False))
+                last_save_at = time.time()
+            except Exception as e:
+                log.warning("[ws:ondevice auto-save] error: %s", e)
+
+        while True:
+            result = await result_queue.get()
+            if result is None:
+                break
+            try:
+                if not result["is_final"]:
+                    await websocket.send_json({
+                        "text": result["text"], "is_final": False,
+                        "speaker": last_speaker, "speaker_id": last_speaker_id,
+                        "chunk_id": current_chunk_id,
+                    })
+                    continue
+
+                # Final: diarize from the segment PCM carried on the result
+                pcm = result.get("pcm") or b""
+                if len(pcm) >= DIARIZE_MIN_BYTES:
+                    try:
+                        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+                        speaker_info = await loop.run_in_executor(
+                            None, diarizer.identify_speaker_from_samples, samples, 16000
+                        )
+                        last_speaker = speaker_info.get("speaker", last_speaker)
+                        last_speaker_id = speaker_info.get("speaker_id", last_speaker_id)
+                    except Exception as e:
+                        log.warning("[ws:ondevice] diarize error: %s", e)
+
+                msg = {
+                    "text": result["text"], "is_final": True,
+                    "speaker": last_speaker, "speaker_id": last_speaker_id,
+                    "chunk_id": current_chunk_id,
+                }
+                await websocket.send_json(msg)
+                _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], current_chunk_id)
+
+                # Translation already done inside the session; relay it with the SAME chunk_id
+                translation = result.get("translation")
+                if translation:
+                    await websocket.send_json({
+                        "type": "translation",
+                        "translation": translation,
+                        "chunk_id": current_chunk_id,
+                        "append": True,
+                    })
+
+                current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+
+                if time.time() - last_save_at >= SAVE_INTERVAL:
+                    _flush_to_db()
+
+            except WebSocketDisconnect:
+                break
+
+        _flush_to_db()
+
+    send_task = asyncio.create_task(_send_results())
+
+    try:
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            if "bytes" in data:
+                audio_bytes = data["bytes"]
+                session.feed_audio(audio_bytes)
+                if archive_fh is not None:
+                    try:
+                        archive_fh.write(audio_bytes)
+                    except Exception as e:
+                        log.warning("[ws:ondevice-stream] archive write failed: %s", e)
+            elif "text" in data:
+                txt = data["text"]
+                if txt == "STOP":
+                    break
+                if txt.startswith("TRANSLATE:"):
+                    lang_cmd = txt[len("TRANSLATE:"):].strip()
+                    if lang_cmd.lower() == "off":
+                        translate_state["lang"] = ""
+                        log.info("[ws:ondevice] Translation disabled mid-session")
+                    else:
+                        translate_state["lang"] = lang_cmd
+                        # Phase-1 limitation: session captured translate_fn at build time,
+                        # so enabling mid-session won't retroactively load NLLB.
+                        log.info("[ws:ondevice] Translation toggle mid-session (lang=%s); "
+                                 "applies only if NLLB was loaded at connect time", lang_cmd)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        session.stop()
+        result_thread.join(timeout=5)
+        try:
+            await asyncio.wait_for(send_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            send_task.cancel()
+        _close_archive()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 # ─── Soniox Streaming WebSocket ───
 @app.websocket("/ws/soniox-stream")
 async def soniox_stream_ws(websocket: WebSocket):

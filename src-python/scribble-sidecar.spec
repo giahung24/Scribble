@@ -61,6 +61,19 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('imageio_ffmpeg')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# ── On-device STT + translation native libs ──
+# faster-whisper + ctranslate2 carry compiled extensions and bundled runtime
+# libs (CT2's libctranslate2 + CPU BLAS); transformers/tokenizers/sentencepiece
+# back the NLLB tokenizer; huggingface_hub does download-on-demand at runtime.
+# collect_all is required so PyInstaller picks up the .so/.dll/.pyd + data files
+# (a plain hiddenimport pulls only the top-level .py and the engine fails to
+# load at runtime). Models themselves are NOT bundled — downloaded on demand.
+# 'av' (PyAV) is how faster-whisper decodes the WAV in the batch/upload path —
+# it carries compiled extensions + bundled ffmpeg libs, so it must be collected.
+for _pkg in ('faster_whisper', 'ctranslate2', 'av', 'transformers', 'tokenizers', 'sentencepiece', 'huggingface_hub'):
+    tmp_ret = collect_all(_pkg)
+    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
 # None of these are needed for the sidecar (FastAPI + STT).
@@ -68,7 +81,10 @@ excludes = [
     # Deep Learning frameworks (NOT needed — we use onnxruntime only)
     'torch', 'torchvision', 'torchaudio', 'torchtext',
     'tensorflow', 'tf2onnx', 'keras',
-    'transformers', 'diffusers', 'accelerate', 'safetensors',
+    # NOTE: 'transformers' is intentionally NOT excluded — the on-device NLLB
+    # tokenizer (AutoTokenizer) needs it. It's framework-agnostic here (no torch
+    # bundled), so the heavy DL deps below stay excluded.
+    'diffusers', 'accelerate', 'safetensors',
     'modelscope',
 
     # LangChain / LLM frameworks (NOT needed — we call API directly)
